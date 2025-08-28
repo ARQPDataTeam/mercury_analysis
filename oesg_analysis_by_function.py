@@ -1454,14 +1454,14 @@ def m_k_clustering():
 
     def mi_calculator(slope_series, lat_series, lon_series):
 
-        logger.debug(f"{'slope_series'}: {slope_series}")
-        logger.debug(f"{'lat_series'}: {lat_series}")
-        logger.debug(f"{'lon_series'}: {lon_series}")
+        # logger.debug(f"{'slope_series'}: {slope_series}")
+        # logger.debug(f"{'lat_series'}: {lat_series}")
+        # logger.debug(f"{'lon_series'}: {lon_series}")
         
         mk_df['trend_val'] = slope_series
 
         # --- Convert to GeoDataFrame ---
-        gdf = gp.GeoDataFrame(slope_series, geometry=gp.points_from_xy(lon_series, lat_series), crs="EPSG:4326")
+        gdf = gp.GeoDataFrame({"trend_val": slope_series}, geometry=gp.points_from_xy(lon_series, lat_series), crs="EPSG:4326")
 
         # --- Build spatial weights: k nearest neighbors ---
         w = KNN.from_dataframe(gdf, k=3)
@@ -1486,15 +1486,17 @@ def m_k_clustering():
         })
         records_eu.append({
             "identifier": identifier,
-            "I_america": I_val_eu,
-            "p_america": p_val_eu
+            "I_europe": I_val_eu,
+            "p_europe": p_val_eu
         })
 
     mi_results_am_df = pd.DataFrame(records_am)
     mi_results_eu_df = pd.DataFrame(records_eu)
 
-    print (mi_results_am_df)
-    print (mi_results_eu_df)
+    wet_dep_moranI_df = mi_results_am_df.merge(mi_results_eu_df, on='identifier')
+
+    wet_dep_moranI_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wet_dep_moranI_results.csv', index=False)
+    logger.debug("\nwet_dep_moranI_df:\n%s", wet_dep_moranI_df)
 
 def emissions_test():
     emissions_df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\test_edgar_emissions.csv')
