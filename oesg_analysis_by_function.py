@@ -31,11 +31,22 @@ import shutil
 from collections import defaultdict
 from libpysal.weights import KNN
 from esda.moran import Moran
+import logging
 
 
 
 # local module import
 from credentials import sql_engine_string_generator
+
+# set logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Create a console handler for logging debug output
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s | %(name)s | %(levelname)s | %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 ################## SQL database stuff ##############################
 
@@ -1429,24 +1440,61 @@ def m_k_clustering():
     # mk_df = mk_df.sort_values("ipcc_region")
     # mk_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wet_dep_seasonal_M-K_results.csv', index=False)
 
-    # Save or inspect
-    print(mk_df.head())
+    # # Save or inspect
+    # print(mk_df.head())
 
     # --- Choose the trend column you want to test ---
     # Example: test clustering for Q1 precip-weighted concentration slope
-    mk_df['trend_val'] = mk_df['pwc_slope_Q1']
+    slope_cols = [c for c in mk_df.columns if "slope" in c]
+    slope_identifiers = [c.replace("slope_", "") for c in slope_cols]
 
-    # --- Convert to GeoDataFrame ---
-    gdf = gp.GeoDataFrame(df, geometry=gp.points_from_xy(mk_df['londecd'], mk_df['latdecd']), crs="EPSG:4326")
+    # split the dataframe into America and Europe
+    mk_df_america = mk_df[mk_df['ipcc_region'].str.contains("America", na=False)]
+    mk_df_europe = mk_df[mk_df['ipcc_region'].str.contains("Europe", na=False)]
 
-    # --- Build spatial weights: k nearest neighbors ---
-    w = KNN.from_dataframe(gdf, k=3)
-    w.transform = 'R'  # row-standardize weights
+    def mi_calculator(slope_series, lat_series, lon_series):
 
-    # --- Run Moran's I ---
-    mi = Moran(gdf['trend_val'], w, permutations=999)
-    print(f"Moran's I: {mi.I}")
-    print(f"p-value: {mi.p_sim}")    
+        logger.debug(f"{'slope_series'}: {slope_series}")
+        logger.debug(f"{'lat_series'}: {lat_series}")
+        logger.debug(f"{'lon_series'}: {lon_series}")
+        
+        mk_df['trend_val'] = slope_series
+
+        # --- Convert to GeoDataFrame ---
+        gdf = gp.GeoDataFrame(slope_series, geometry=gp.points_from_xy(lon_series, lat_series), crs="EPSG:4326")
+
+        # --- Build spatial weights: k nearest neighbors ---
+        w = KNN.from_dataframe(gdf, k=3)
+        w.transform = 'R'  # row-standardize weights
+
+        # --- Run Moran's I ---
+        mi = Moran(gdf['trend_val'], w, permutations=999)
+        return mi.I, mi.p_sim
+
+    records_am = []
+    records_eu = []
+
+
+    for i, col in enumerate(slope_cols):
+        identifier = slope_identifiers[i]
+        I_val_am, p_val_am = mi_calculator(mk_df_america[col],mk_df_america['latdecd'],mk_df_america['londecd'] )
+        I_val_eu, p_val_eu = mi_calculator(mk_df_europe[col],mk_df_europe['latdecd'],mk_df_europe['londecd'])
+        records_am.append({
+            "identifier": identifier,
+            "I_america": I_val_am,
+            "p_america": p_val_am
+        })
+        records_eu.append({
+            "identifier": identifier,
+            "I_america": I_val_eu,
+            "p_america": p_val_eu
+        })
+
+    mi_results_am_df = pd.DataFrame(records_am)
+    mi_results_eu_df = pd.DataFrame(records_eu)
+
+    print (mi_results_am_df)
+    print (mi_results_eu_df)
 
 def emissions_test():
     emissions_df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\test_edgar_emissions.csv')
@@ -1688,13 +1736,13 @@ def deposition_update(sql_engine):
 # minamata_wet_dep_stats()
 
 # wet dep seasonal m-k function
-minamata_wet_dep_m_k_analysis()
+# minamata_wet_dep_m_k_analysis()
 
 # follow up on mk analysis for summary
 # m_k_summary()
 
 # spatial clustering of m-k trends
-# m_k_clustering()
+m_k_clustering()
 
 # run an emissions test
 # emissions_test()
