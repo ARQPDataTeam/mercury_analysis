@@ -3,3 +3,6 @@
 *.pyc
 *.pyo
 ./__pycache__/*
+gsod_data/
+supporting_data_files/
+
