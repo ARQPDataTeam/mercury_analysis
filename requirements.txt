@@ -9,7 +9,6 @@ requests
 matplotlib
 geopy
 matplotlib
-timezonefinder
 fiona
 shapely
 seaborn
@@ -17,5 +16,3 @@ geopandas[all]
 pymannkendall
 libpysal --only-binary :all
 esda --only-binary :all
-
-
