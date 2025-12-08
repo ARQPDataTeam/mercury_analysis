@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv 
 
+# function to generate sql engine string
+
 def sql_engine_string_generator(qp_host, qp_hgee_user, qp_hgee_pwd, datahub_db): 
 
     # load the .env file using the dotenv module remove this when running a powershell script to confirue system environment vars

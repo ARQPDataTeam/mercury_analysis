@@ -16,3 +16,7 @@ geopandas[all]
 pymannkendall
 libpysal --only-binary :all
 esda --only-binary :all
+dash
+dash_bootstrap_components
+
+# activating the .venv: .\.venv\Scripts\Activate.ps1

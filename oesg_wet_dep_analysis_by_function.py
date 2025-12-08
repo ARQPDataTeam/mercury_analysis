@@ -34,8 +34,7 @@ from collections import defaultdict
 from libpysal.weights import KNN
 from esda.moran import Moran
 import logging
-
-
+from dotenv import load_dotenv
 
 # local module import
 from credentials import sql_engine_string_generator

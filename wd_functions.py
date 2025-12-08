@@ -13,10 +13,21 @@ import glob
 import re
 from io import StringIO
 from pathlib import Path
+import logging
+from dotenv import load_dotenv
 
 # local module import
 from credentials import sql_engine_string_generator
 
+# set logging
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Create a console handler for logging debug output
+console_handler = logging.StreamHandler()
+formatter = logging.Formatter('%(asctime)s | %(name)s | %(levelname)s | %(message)s')
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
 
 ################## SQL database stuff ##############################
 
