@@ -36,7 +36,6 @@ from esda.moran import Moran
 import logging
 from scipy.stats import chi2
 from matplotlib.patches import Patch
-from dotenv import load_dotenv
 
 # local module import
 from credentials import sql_engine_string_generator

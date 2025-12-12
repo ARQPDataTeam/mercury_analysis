@@ -1,0 +1,60 @@
+three tables involved:
+mpn__dma_v0 = data source table
+pas_tracking = sample tracking table
+mpn__dma_v1 = data destination table
+
+example data from v0 table:
+num,pos,smpnm,crt_dt,proc_dt,amnt,conc_amt,extr_type,state,cal_file,meth_file,pk_ht,cell,hg,conc,dil_wt,fin_vol,cal_fac,dil_fac,stat,grp,rem,smpid,kitid,smptyp
+113,1,ECCC1376EC-1023 Kimberley_24Q3_B1,2025-09-17-11-57-19,2025-09-17-12-11-39,0.2974,g,0.2974,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.031,1,0.6585,2.2141,µg/kg,,,1,,,,C spilled into tray; 2nd half (0.3066g) was lost,EC-1023,blank
+114,2,ECCC1339EC-1023 Kimberley_24Q3_S1,2025-09-17-12-09-43,2025-09-17-12-21-40,0.3065,g,0.3065,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.4727,1,9.2918,30.316,µg/kg,,,1,,,,inner bag open; mesh screen still on,EC-1023,sample
+115,3,ECCC1339EC-1023 Kimberley_24Q3_S2,2025-09-17-12-13-46,2025-09-17-12-32-31,0.3193,g,0.3193,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.5877,1,11.9539,37.4379,µg/kg,,,1,,,,,EC-1023,sample
+116,4,na2co3+di,2025-09-17-12-15-33,2025-09-17-12-43-22,1,g,1,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.0034,1,0.1794,0.1794,µg/kg,,,1,,,,,,spike
+117,5,ECCC1377EC-1023 Kimberley_24Q3_S1,2025-09-17-12-19-39,2025-09-17-12-54-13,0.3369,g,0.3369,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.4601,1,9.0145,26.7571,µg/kg,,,1,,,,inner bag open; mesh screen still on,EC-1023,sample
+118,6,ECCC1377EC-1023 Kimberley_24Q3_S2,2025-09-17-12-22-35,2025-09-17-13-05-04,0.2837,g,0.2837,g,normal,finished,Calibration_Carbon 2025-09-16 HJ.c80,570Carbon.m80,0.558,1,11.2435,39.6316,µg/kg,,,1,,,,,EC-1023,sample
+
+only need smpnm, hg, smpid, kitid, smptyp
+only need kitid, sample_start and sample_end from pas_tracking table
+sample_start	sample_end	samplename	kitid	samplername
+2022-01-13 08:05:00-05	2022-03-31 05:20:00-04	EC-0029_ECCC0482	EC-0029	ECCC0482
+2022-01-13 08:00:00-05	2022-03-30 20:00:00-04	EC-0029_ECCC0483	EC-0029	ECCC0483
+2021-07-04 20:00:00-04	2021-11-02 06:50:00-04	EC-0121_ECCC0710	EC-0121	ECCC0710
+2021-07-04 20:00:00-04	2021-11-02 06:50:00-04	EC-0121_ECCC0709	EC-0121	ECCC0709
+2021-07-04 20:00:00-04	2021-11-02 06:50:00-04	EC-0121_ECCC0708	EC-0121	ECCC0708
+2021-06-30 10:56:00-04	2021-09-30 06:15:00-04	EC-0125_ECCC0720	EC-0125	ECCC0720
+
+
+
+step 1: copy kitid from v0 table: 
+mpn__dma_v1.kitid = mpn__dma_v0.kitid
+
+step 2: copy start and end dates for sample tracking to v1 table
+mpn__dma_v1.start_dt = pas_tracking table.sample_start 
+mpn__dma_v1.end_dt = pas_tracking table.sample_end
+
+step 3: calculate duration (days) between start and end:
+mpn__dma_v1.smp_dur = mpn__dma_v1.end_dt-mpn__dma_v1.start_dt
+
+for each kitID there are 3 samples each with 2 sectors:
+ECCC1781EC-1284 Aneboda_25Q2_B1
+ECCC1781EC-1284 Aneboda_25Q2_B2
+ECCC0832EC-1284 Aneboda_25Q2_S1
+ECCC0832EC-1284 Aneboda_25Q2_S2
+ECCC1923EC-1284 Aneboda_25Q2_S1
+ECCC1923EC-1284 Aneboda_25Q2_S2
+
+ECCC#### is the sampleID (smpid)
+EC-#### is the kitID (kitid)
+
+loop through the kitid list:
+list the smpid values where smptyp=='sample'
+add the blank values for that kit: mpn__dma_v1.b_mass = sum(hg) where smptyp=='blank'
+add the sector values for each sample: i.e. mpn__dma_v1.s[i+1]_mass = sum(hg) where smpid==id[i] and smptyp=='sample'
+average the sample masses: mpn__dma_v1.av_mass = average(mpn__dma_v1.s1_mass,mpn__dma_v1.s2_mass)
+calculate blank corrected mass: mpn__dma_v1.bcorr_mass = mpn__dma_v1.av_mass-mpn__dma_v1.b_mass
+calculate the sample concentration: mpn__dma_v1.conc = mpn__dma_v1.bcorr_mass/(mpn__dma_v1.smpdur*mpn__dma_v1.flow)
+calculate the met corrected sample rate: 
+mpn__dma_v1.adj_flow = 0.111+(mpn__dma_v1.tempa-9.89)*0.0009+(mpn__dma_v1.ws_mean-3.41)*0.003
+calculate met corrected sample concentration: mpn__dma_v1.adj_conc = mpn__dma_v1.bcorr_mass/(mpn__dma_v1.smpdur*mpn__dma_v1.adj_flow)
+
+
+,

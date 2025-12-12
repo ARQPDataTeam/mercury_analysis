@@ -1,0 +1,14 @@
+CREATE TABLE "data".passives_met (
+	siteid text, NOT NULL,
+	datetime timestamptz NOT NULL,
+	site_description, NOT NULL,
+	site_latdecd numeric NOT NULL,
+	site_londecd numeric NOT NULL,
+	station_id numeric NULL,
+	station_description text NULL,
+	station_latdecd numeric NULL,
+	station_londecd numeric NULL,
+	tempav numeric NULL,
+	ws_smean numeric NULL,
+	CONSTRAINT passives_met_pk PRIMARY KEY (siteid,datetime)
+);
