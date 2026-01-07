@@ -157,18 +157,13 @@ def handle_csv_upload(contents, filename):
         return ""
 
     try:
-        # -----------------------------------
         # Decode Base64
-        # -----------------------------------
         content_type, content_string = contents.split(",")
         raw_bytes = base64.b64decode(content_string)
 
-        # -----------------------------------
-        # Try multiple encodings (UTF-8, cp1252, latin-1)
-        # -----------------------------------
+        # Try multiple encodings
         encodings = ["utf-8", "cp1252", "latin1"]
         text = None
-
         for enc in encodings:
             try:
                 text = raw_bytes.decode(enc)
@@ -178,92 +173,70 @@ def handle_csv_upload(contents, filename):
                 continue
 
         if text is None:
-            return f"❌ ERROR: Unable to decode file '{filename}'. Unsupported character encoding."
+            return f" ERROR: Unable to decode file '{filename}'."
 
-        # Read CSV into DataFrame
         df = pd.read_csv(io.StringIO(text), skiprows=[0,1,2,4])
 
     except Exception as e:
-        return f"❌ ERROR while reading CSV '{filename}': {str(e)}"
+        return f" ERROR while reading CSV '{filename}': {str(e)}"
 
+    # -----------------------------------
+    # PROCESSING BLOCK
+    # -----------------------------------
     try:
-        # check for column names containing 'Unit' and remove them
-        df = df.drop(columns=[col for col in df.columns if "unit" in col.lower()])
+        df = df.drop(columns=[c for c in df.columns if "unit" in c.lower()])
+        df = df.loc[:, ~df.columns.str.contains("^Unnamed")]
 
-        # drop any unnamed columns
-        df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
+        df.columns = ['num','pos','smpnm','crt_dt','proc_dt','amnt','conc_amt',
+                      'extr_type','state','cal_file','meth_file','pk_ht','cell',
+                      'hg','conc','dil_wt','fin_vol','cal_fac','dil_fac',
+                      'stat','grp','rem']
 
-        # rename columns to match database schema
-        df.columns = ['num','pos','smpnm','crt_dt','proc_dt','amnt','conc_amt','extr_type','state','cal_file','meth_file','pk_ht','cell','hg','conc','dil_wt','fin_vol','cal_fac','dil_fac','stat','grp','rem']
+        df['crt_dt'] = pd.to_datetime(df['crt_dt'], errors='coerce',
+                                      format="%Y-%m-%d-%H-%M-%S")
+        df['proc_dt'] = pd.to_datetime(df['proc_dt'], errors='coerce',
+                                       format="%Y-%m-%d-%H-%M-%S")
 
-        # convert date columns to datetime where current format is YYYY-MM-DD-HH-MM-SS
-
-        df['crt_dt'] = pd.to_datetime(df['crt_dt'], errors='coerce', format="%Y-%m-%d-%H-%M-%S")
-        df['proc_dt'] = pd.to_datetime(df['proc_dt'], errors='coerce', format="%Y-%m-%d-%H-%M-%S")  
-
-        # create a samplerID and kit ID based on the SampleName only in rows where smpnm starts with 'ECCC' otherwise set to NaN
         df['smpid'] = df['smpnm'].where(df['smpnm'].str.startswith('ECCC')).str.slice(0,8)
         df['kitid'] = df['smpnm'].where(df['smpnm'].str.startswith('ECCC')).str.slice(8,15)
 
-        # create a sample type based on the SampleName
-        def determine_sample_type(smpnm):
-            if pd.isna(smpnm):
-                return None
-            elif smpnm.startswith('ECCC'):
-                return 'sample'
-            elif 'bb' in smpnm:
-                return 'blank'
-            elif smpnm.endswith('ng'):
-                return 'standard'
-            elif smpnm.startswith('na2co3'):
-                return 'flush'
-            else:
-                return 'Other'
-        
+        def determine_sample_type(s):
+            if pd.isna(s): return None
+            if s.startswith('ECCC'): return 'sample'
+            if 'bb' in s: return 'blank'
+            if s.endswith('ng'): return 'standard'
+            if s.startswith('na2co3'): return 'flush'
+            return 'Other'
+
         df['smptyp'] = df['smpnm'].apply(determine_sample_type)
 
-        # check for errors in date conversion
+        # validate
         if df['crt_dt'].isnull().any() or df['proc_dt'].isnull().any():
-            return f"❌ ERROR: Date conversion failed for some rows in file '{filename}'. Please check date formats."
-        
-        # check for typos in the sampler name:
-        # df['smpid'] should start with 'ECCC' for rows where smptyp is 'sample'
-        typo_rows = df[(df['smptyp'] == 'sample') & (~df['smpid'].str.startswith('ECCC', na=False))]
-        if not typo_rows.empty:
-            return f"❌ ERROR: Potential typos found in sampler names in file '{filename}'. Please check the following rows:\n{typo_rows[['smpnm', 'smpid']].to_string(index=False)}"
-        
-        # df['kitid'] should look like 'EC-####' for rows where smptyp is 'sample'
-        typo_rows_kit = df[(df['smptyp'] == 'sample') & (~df['kitid'].str.match(r'EC-\d{4}', na=False))]
-        if not typo_rows_kit.empty:
-            return f"❌ ERROR: Potential typos found in kit IDs in file '{filename}'. Please check the following rows:\n{typo_rows_kit[['smpnm', 'kitid']].to_string(index=False)}"
-        
+            return f" ERROR: Date conversion failed in '{filename}'."
 
-        # If all checks pass, return the processed DataFrame
-        return df
+        typo_rows = df[(df['smptyp']=='sample') &
+                       (~df['smpid'].str.startswith('ECCC', na=False))]
+        if not typo_rows.empty:
+            return f" ERROR: Typos in sample names: {typo_rows[['smpnm','smpid']].to_string(index=False)}"
+
+        typo_rows_kit = df[(df['smptyp']=='sample') &
+                           (~df['kitid'].str.match(r'EC-\d{4}', na=False))]
+        if not typo_rows_kit.empty:
+            return f" ERROR: Typos in kit IDs: {typo_rows_kit[['smpnm','kitid']].to_string(index=False)}"
 
     except Exception as e:
-        return f"❌ ERROR during processing: {str(e)}"
+        return f" ERROR during processing: {str(e)}"
 
     # -----------------------------------
-    # SQL UPLOAD with error handling
+    # SQL UPLOAD NOW RUNS
     # -----------------------------------
-    # try:
-    #     df.to_sql(
-    #         "my_table",
-    #         sql_engine,
-    #         if_exists="append",
-    #         index=False
-    #     )
+    try:
+        df.to_sql("my_table", sql_engine, if_exists="append", index=False)
 
-    # except SQLAlchemyError as e:
-    #     return f"❌ SQL ERROR inserting into database: {str(e.__cause__ or e)}"
+    except SQLAlchemyError as e:
+        return f" SQL ERROR inserting into database: {str(e)}"
 
-    # except Exception as e:
-    #     return f"❌ Unexpected SQL error: {str(e)}"
-
-    # -----------------------------------
-    # SUCCESS
-    # -----------------------------------
+    # SUCCESS MESSAGE
     return (
         f"✅ File '{filename}' processed and uploaded successfully "
         f"(encoding={used_encoding}, rows={len(df)})."

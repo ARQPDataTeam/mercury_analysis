@@ -66,12 +66,34 @@ from credentials import sql_engine_string_generator
 # print("Combined data saved to CSV.")
 
 
-path = r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis\gsod_data\passives_met_data.csv"
+path = r"\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\Passive Samplers\Analysis\gsod_met_data\passives_met_data.csv"
 
 # read the combined csv
 df = pd.read_csv(path)
 
 print (df.columns)
+
+# read in a temporary passives table from https://007gc-my.sharepoint.com/:x:/r/personal/meguel_yousif_ec_gc_ca/Documents/Microsoft%20Teams%20Chat%20Files/pas_sites_table_NEW%201.xlsx?d=w2311462c2945498db3e8c98b19d063c9&csf=1&web=1&e=1NmdRR
+temp_passives = pd.read_excel(r"C:\Users\firanskib\Downloads\pas_sites_table_NEW 1.xlsx", usecols=['alternate_siteid', 'Description'])
+
+print (temp_passives.columns)
+
+# rename columns for merging
+temp_passives = temp_passives.rename(columns={'alternate_siteid': 'siteid', 'Description': 'site_description'})
+# merge on site id to identify mismatches
+df = pd.merge(df, temp_passives, on=['siteid', 'site_description'], how='left')
+# print out site_description values without matching siteid
+missing_siteids = df[df['siteid'].isna()]['site_description'].unique()  
+if len(missing_siteids) > 0:
+    print("The following site_description values do not have matching siteid:")
+    for desc in missing_siteids:
+        print(f"- {desc}")
+else:
+    print("All site_description values have matching siteid.")
+
+# save the df with siteid to csv
+output_folder = r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis"
+df.to_csv(output_folder + r"\passives_met_data_with_siteid.csv", index=False)
 
 # # read the excel file passives_stations to get mapping for siteid
 # sites_df = pd.read_excel(r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis\gsod_data\passives_stations.xlsx", usecols=['siteid', 'passives_site_name'])
@@ -100,17 +122,17 @@ print (df.columns)
 # df.to_csv(output_folder + r"\passives_met_data.csv", index=False)
 
 # connect to database
-engine_string = sql_engine_string_generator('QP_SERVER','QP_EDIT','QP_EDIT_PASSWORD','mercury_passive')
-engine = create_engine(engine_string)
+# engine_string = sql_engine_string_generator('QP_SERVER','QP_EDIT','QP_EDIT_PASSWORD','mercury_passive')
+# engine = create_engine(engine_string)
 
 # insert data into database
-try:
-    with engine.begin() as connection:   # <-- auto-commit
-        # set timezone to GMT
-        connection.execute(text("SET TIME ZONE 'GMT';"))
-        # insert data
-        df.to_sql('passives_met', con=connection, if_exists='append', index=False)
-        print(f"Data inserted successfully.")
-except SQLAlchemyError as e:
-    logging.error(f"Error inserting data: {e}")
+# try:
+#     with engine.begin() as connection:   # <-- auto-commit
+#         # set timezone to GMT
+#         connection.execute(text("SET TIME ZONE 'GMT';"))
+#         # insert data
+#         df.to_sql('passives_met', con=connection, if_exists='append', index=False)
+#         print(f"Data inserted successfully.")
+# except SQLAlchemyError as e:
+#     logging.error(f"Error inserting data: {e}")
 

@@ -14,7 +14,6 @@ import re
 from io import StringIO
 from pathlib import Path
 import logging
-from dotenv import load_dotenv
 
 # local module import
 from credentials import sql_engine_string_generator
@@ -877,7 +876,7 @@ def mdn_assimilator():
             f.write(file + '\n')
 
 def ebas_wd_assimilator():
-    ebas_wd_path = r'C:\Users\firanskib\OneDrive - EC-EC\mercury\EBAS\direct_ebas_query_files_ames_format\*'
+    ebas_wd_path = r'C:\Users\firanskib\Documents\hg_bernard_2025_1125\*'
     # ebas_wd_path = r'C:\Users\firanskib\OneDrive - EC-EC\mercury\EBAS\test\*'
 
     # read in a site df
@@ -963,21 +962,20 @@ def ebas_wd_assimilator():
 
         # --- Data section ---
         start_idx = next(i for i, line in enumerate(lines) if line.startswith("starttime"))
-        colnames = re.split(r"\s+", lines[start_idx].strip())
+        raw_cols = re.split(r"\s+", lines[start_idx].strip())
 
-        # check for repeat column names and append _repeat to duplicates
-        seen = []
-        for i, col in enumerate(colnames):
-            if col in seen:
-                print ('site:', site)
-                print (f"Duplicate column found: {col}, renaming to {col}_repeat")
-                colnames[i] = f"{col}_repeat"
-            else:
-                seen.append(col)
+        # Enumerate duplicate column names: mm_0, mm_1, mm_2, ...
+        cols = (
+            pd.Series(raw_cols)
+            .groupby(raw_cols)
+            .cumcount()
+            .astype(str)
+            .radd('_')
+            .radd(pd.Series(raw_cols))
+        )
 
-        
-        
-        
+        # print ('Columns detected:', cols.tolist())
+
         # --- Read data rows ---
         data = []
         for line in lines[start_idx + 1:]:
@@ -985,10 +983,21 @@ def ebas_wd_assimilator():
                 break
             data.append(re.split(r"\s+", line.strip()))
 
-        df = pd.DataFrame(data, columns=colnames).apply(pd.to_numeric, errors='coerce')
+        df = pd.DataFrame(data, columns=cols).apply(pd.to_numeric, errors="coerce")
 
-        # drop columns that have 'repeat' in the name
-        df = df.loc[:, ~df.columns.str.contains('repeat')]
+        # --- Keep only the highest index columns for each variable ---
+        idx = (
+        pd.Series(df.columns)
+        .str.rsplit("_", n=1, expand=True)
+        .assign(n=lambda x: x[1].astype(int))
+        .groupby(0)["n"]
+        .idxmax()
+    )
+
+        df = df.iloc[:, idx.sort_values()]
+
+        # drop column suffixes
+        df.columns = df.columns.str.replace(r"_\d+$", "", regex=True)
 
         # --- Date handling ---
         df['start_dt'] = df['starttime'].apply(lambda x: ref_date + dt.timedelta(days=float(x)))
@@ -1115,10 +1124,117 @@ def ebas_wd_assimilator():
 )           
 
 
+    site_map = {
+        "YarnerWood": "Yarner Wood",
+        "Kårvatn": "Kårvatn",
+        "Kotinen": "Kotinen",
+        "VirolahtiIII": "Virolahti III",
+        "VirolahtiII": "Virolahti II",
+        "Gårdsjön": "Gårdsjön",
+        "Vavihill": "Vavihill",
+        "Rörvik": "Rörvik",
+        "Kise": "Kise",
+        "Hurdal": "Hurdal",
+        "PeyrusseVieille": "Peyrusse Vieille",
+        "TurloughHill": "Turlough Hill",
+        "ValentiaObservatory": "Valentia Observatory",
+        "Chilton": "Chilton",
+        "HeighamHolmes": "Heigham Holmes",
+        "Lahemaa": "Lahemaa",
+        "StaxtonWold": "Staxton Wold",
+        "Ulborg": "Ulborg",
+        "Aspvreten": "Aspvreten",
+        "Knokke": "Knokke",
+        "Kosetice(NAOK)": "Kosetice (NAOK)",
+        "Hyytiälä": "Hyytiälä",
+        "ChilboltonObservatory": "Chilbolton Observatory",
+        "DiablaGora": "Diabla Gora",
+        "Banchory": "Banchory",
+        "Lista": "Lista",
+        "VirolahtiHarju": "Virolahti Harju",
+        "Harwell": "Harwell",
+        "Zoseni": "Zoseni",
+        "EastRuston": "East Ruston",
+        "Birkenes": "Birkenes",
+        "Szymbark": "Szymbark",
+        "AuchencorthMoss": "Auchencorth Moss",
+        "MossObservatory": "Moss Observatory",
+    }
+
+    ebas_wd_df["site"] = ebas_wd_df["site"].replace(site_map)
+
     # output the standardized ebas wet dep data to csv    
-    out_file = r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_ebas_output_2025-10-20.csv'
+    out_file = r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_ebas_output_2025-12-30.csv'
     ebas_wd_df.to_csv(out_file, index=False)
     print(f"Saved standardized EBAS data to: {out_file}")
+
+
+def wet_dep_comparison():
+    # read in the two wet dep dataframes
+
+    base_keys = ["datetime", "site"]
+
+    table_wd_df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wet_dep_export.csv')
+    ebas_wd_df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_ebas_update_output_2025-12-30.csv')
+
+    # list the sites that are in both dataframes
+    sites_in_ebas = set(ebas_wd_df['site'].unique())
+    sites_in_table = set(table_wd_df['site'].unique())
+
+    print (f"sites in EBAS data: {sites_in_ebas}")
+    print (f"sites in Table data: {sites_in_table}")
+
+    sites_in_both = sites_in_ebas & sites_in_table
+    print (f"sites in both dataframes: {sites_in_both}")
+
+    # compare the entries in ebas to those in the table for the sites in both
+    ebas_subset = ebas_wd_df[ebas_wd_df['site'].isin(sites_in_both)]
+
+    candidates = (ebas_subset.merge(
+            table_wd_df[base_keys + ["project"]],
+            on=base_keys,
+            how="left",
+            suffixes=("_ebas", "_table"),
+            indicator=True
+        )
+    )
+
+    new_rows = candidates[
+        (candidates["_merge"] == "left_only") |
+        (
+            (candidates["_merge"] == "both") &
+            (~candidates.apply(
+                lambda r: (
+                    False
+                    if pd.isna(r["project_table"])
+                    else r["project_ebas"] in r["project_table"]
+                ),
+                axis=1
+            ))
+        )
+    ].drop(columns="_merge")    
+    # save the new sites to a csv
+    new_rows.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_new_rows.csv', index=False)
+
+
+    # table_wd_df["datetime"] = pd.to_datetime(table_wd_df["datetime"])
+    # ebas_wd_df["datetime"] = pd.to_datetime(ebas_wd_df["datetime"])
+
+
+    # table_wd_df["project"] = table_wd_df["project"].astype(str).str.strip()
+    # ebas_wd_df["project"] = ebas_wd_df["project"].astype(str).str.strip()
+
+    # new_rows = (
+    #     ebas_wd_df
+    #     .merge(table_wd_df, on=key_cols, how="left", indicator=True)
+    #     .query("_merge == 'left_only'")
+    #     .drop(columns="_merge")
+    # )
+
+    # print(f"New rows to insert: {len(new_rows)}")
+    # print(new_rows.head())
+    
+
 
 def wd_check():
     # do a check for issues in the wet dep data
@@ -1189,7 +1305,18 @@ def wd_check():
 # a dataframe uploader
 def upload_dataframe_to_sql(sql_engine):
     # set the upload filepath
-    filepath = r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_output_2025-11-05.csv'
+    filepath = r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\test.csv'
+    # upload the csv to pandas dataframe
+    df = pd.read_csv(filepath, encoding='utf-8', index_col=False)
+    # print the columns of the dataframe
+    print(f"Columns in dataframe: {df.columns.tolist()}")
+
+    # print the dataframe head
+    print (df['datetime'])
+
+    print(df.index)
+    print(df.index.name)
+
     # get the raw psycopg2 connection
     conn = sql_engine.raw_connection()
     try:
@@ -1230,8 +1357,11 @@ def upload_dataframe_to_sql(sql_engine):
 # run an ebas wet dep assimilator
 # ebas_wd_assimilator()
 
+# run a wet dep comparison
+wet_dep_comparison()
+
 # do a check for issues
-wd_check()
+# wd_check()
 
 # run the uploader function
 # upload_dataframe_to_sql(sql_engine)
