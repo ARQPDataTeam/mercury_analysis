@@ -18,5 +18,7 @@ libpysal --only-binary :all
 esda --only-binary :all
 dash
 dash_bootstrap_components
+windrose
 
-# activating the .venv: .\.venv\Scripts\Activate.ps1
+# activating the .venv in windows: .\.venv\Scripts\Activate.ps1
+# activating the .venv in linux: source .venv/bin/activate
