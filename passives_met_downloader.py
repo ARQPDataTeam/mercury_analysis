@@ -1,99 +1,115 @@
+"""
+Download hourly NOAA ISD meteorological data for a station.
+
+Workflow:
+1. User provides an altsiteid
+2. Query SQL table wmo_stations to retrieve station_id
+3. station_id is the concatenated USAF + WBAN (11 chars with leading zeros)
+4. Build NOAA ISD request URL using:
+    - station_id
+    - start datetime
+    - end datetime
+5. Download data
+
+Requirements:
+    pip install pandas sqlalchemy pyodbc requests
+"""
+
 import pandas as pd
-import numpy as np
-from pathlib import Path
 import requests
+from sqlalchemy import create_engine, text
 
-# Define output folder
-output_folder = Path(r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis\gsod_data")
-output_folder.mkdir(exist_ok=True)
+# -------------------------------------------------------
+# USER INPUTS
+# -------------------------------------------------------
 
-# -------------------------
-# 1) Load data
-# -------------------------
-# passives = pd.read_excel(r"\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\Passive Samplers\passives_stations.xlsx", usecols=['passives_site_name', 'site_latdecd','site_londecd'])
-# stations = pd.read_csv(r"\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\Passive Samplers\isd-history.csv", usecols=['USAF','WBAN','STATION NAME','LAT','LON'], dtype={'USAF': str, 'WBAN': str})
+altsiteid = "SITE_001"
 
-passives = pd.read_excel(r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis\gsod_data\passives_stations.xlsx", usecols=['passives_site_name', 'site_latdecd','site_londecd'])
-stations = pd.read_csv(r"C:\Users\firanskib\Documents\Python Scripts\mercury_analysis\gsod_data\isd-history.csv", usecols=['USAF','WBAN','STATION NAME','LAT','LON'], dtype={'USAF': str, 'WBAN': str})
+start_datetime = "2024-01-01T00:00:00"
+end_datetime   = "2024-01-31T23:59:59"
 
-stations['LAT'] = pd.to_numeric(stations['LAT'], errors='coerce')
-stations['LON'] = pd.to_numeric(stations['LON'], errors='coerce')
-passives['site_latdecd'] = pd.to_numeric(passives['site_latdecd'], errors='coerce')
-passives['site_londecd'] = pd.to_numeric(passives['site_londecd'], errors='coerce')
+# -------------------------------------------------------
+# SQL CONNECTION
+# -------------------------------------------------------
+# Example for SQL Server using Windows Authentication
 
-stations = stations.dropna(subset=['LAT','LON'])
-passives = passives.dropna(subset=['site_latdecd','site_londecd'])
+server = "YOUR_SERVER"
+database = "YOUR_DATABASE"
 
-# -------------------------
-# 2) Find nearest station for each passive site
-# -------------------------
-def find_nearest_station(lat, lon, stations_df):
-    distances = np.sqrt((stations_df['LAT'] - lat)**2 + (stations_df['LON'] - lon)**2)
-    idx = distances.idxmin()
-    # add the distance value if needed
-    distance = distances.min()
-    return stations_df.loc[idx], distance
+connection_string = (
+    f"mssql+pyodbc://@{server}/{database}"
+    "?driver=ODBC+Driver+17+for+SQL+Server"
+    "&trusted_connection=yes"
+)
 
-nearest_stations = []
-for _, row in passives.iterrows():
-    nearest, dist = find_nearest_station(row['site_latdecd'], row['site_londecd'], stations)
-    print (f"Nearest station to {row['passives_site_name']} is {nearest['STATION NAME']} at distance {dist:.4f} USAF: {nearest['USAF']} WBAN: {nearest['WBAN']} ")
-    nearest_stations.append({
-        'passives_site_name': row['passives_site_name'],
-        'nearest_station_name': nearest['STATION NAME'],
-        'USAF': nearest['USAF'],
-        'WBAN': nearest['WBAN'],
-        'station_latdecd': nearest['LAT'],
-        'station_londecd': nearest['LON'],
-        'site_latdecd': row['site_latdecd'],
-        'site_londecd': row['site_londecd'],
-        'distance': dist    # ← add distance here
-    })
+engine = create_engine(connection_string)
 
-nearest_df = pd.DataFrame(nearest_stations)
+# -------------------------------------------------------
+# LOOK UP station_id FROM wmo_stations
+# -------------------------------------------------------
 
-# -------------------------
-# 3) Build 11-digit station code
-# -------------------------
-def format_station_code(usaf, wban):
-    usaf_str = str(usaf).zfill(6)
-    wban_str = str(wban).zfill(5)
-    return usaf_str + wban_str
+query = text("""
+SELECT station_id
+FROM wmo_stations
+WHERE altsiteid = :altsiteid
+""")
 
-nearest_df['station_code'] = nearest_df.apply(lambda x: format_station_code(x['USAF'], x['WBAN']), axis=1)
+with engine.connect() as conn:
+    result = conn.execute(query, {"altsiteid": altsiteid}).fetchone()
 
-print (nearest_df)
+if result is None:
+    raise ValueError(f"No station found for altsiteid = {altsiteid}")
 
-# save nearest stations to csv
-nearest_df.to_csv(output_folder / "nearest_stations.csv", index=False)
+# Preserve leading zeros
+station_id = str(result[0]).zfill(11)
 
-# -------------------------
-# 4) Download NOAA GSOD CSVs 2020 onward
-# -------------------------
+print(f"Station ID: {station_id}")
 
+# -------------------------------------------------------
+# BUILD NOAA ISD URL
+# -------------------------------------------------------
+# NOAA ISD access endpoint
+#
+# Documentation:
+# https://www.ncei.noaa.gov/support/access-data-service-api-user-documentation
+#
+# dataset = global-hourly
 
-years = range(2018, 2020)  # 2018 to 2019 (adjust as needed)
-base_url = "https://www.ncei.noaa.gov/data/global-summary-of-the-day/access"
-results = []
+base_url = "https://www.ncei.noaa.gov/access/services/data/v1"
 
-for _, row in nearest_df.iterrows():
-    station_code = row['station_code']
-    station_name = row['nearest_station_name']
-    site_name = row['passives_site_name']
-    
-    for year in years:
-        url = f"{base_url}/{year}/{station_code}.csv"
-        out_file = output_folder / f"{station_code}_{year}.csv"
-        if out_file.exists():
-            continue
-        try:
-            resp = requests.get(url)
-            if resp.status_code == 200:
-                print(f"Downloading data for station: {station_name} ({station_code})")
-                out_file.write_bytes(resp.content)
-            else:
-                print(f"File not found: {url} (status {resp.status_code})")
-        except Exception as e:
-            print(f"Error downloading {url}: {e}")
+params = {
+    "dataset": "global-hourly",
+    "stations": station_id,
+    "startDate": start_datetime,
+    "endDate": end_datetime,
+    "format": "json",
+    "units": "metric"
+}
 
-print("Download complete.")
+# Build readable query URL
+request_url = requests.Request(
+    "GET",
+    base_url,
+    params=params
+).prepare().url
+
+print("\nNOAA Request URL:")
+print(request_url)
+
+# -------------------------------------------------------
+# DOWNLOAD DATA
+# -------------------------------------------------------
+
+response = requests.get(base_url, params=params)
+
+response.raise_for_status()
+
+data = response.json()
+
+# Convert to dataframe
+df = pd.DataFrame(data)
+
+print("\nRows downloaded:", len(df))
+
+# Preview
+print(df.head())

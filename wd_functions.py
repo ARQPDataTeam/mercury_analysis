@@ -30,16 +30,22 @@ logger.addHandler(console_handler)
 
 ################## SQL database stuff ##############################
 # set global conditions for app and computer name
+# set up path details
+parent_dir = os.getcwd()
+logger.info(f"parent path: {parent_dir}")
+path_prefix = '/' + os.path.basename(os.path.normpath(parent_dir)) + '/'
+logger.info(f"path_prefix: {path_prefix}") 
+
 # set up the sql connection string
-COMPUTER, SERVER, VIEWER_USER, VIEWER_PASSWORD, EDITOR_USER, EDITOR_PASSWORD, DATABASE, URL_PREFIX = get_credentials(parent_dir)
+COMPUTER, SERVER, VIEWER_USER, VIEWER_PASSWORD, MPN_EDITOR_USER, MPN_EDITOR_PASSWORD, MPN_DATABASE, HGEE_EDITOR_USER, HGEE_EDITOR_PASSWORD, HGEE_DATABASE, URL_PREFIX = get_credentials(parent_dir)
 
 # set up the engine
-sql_engine_string=('postgresql://{}:{}@{}/{}?sslmode=require').format(EDITOR_USER,EDITOR_PASSWORD,SERVER,DATABASE)
+sql_engine_string=('postgresql://{}:{}@{}/{}?sslmode=require').format(HGEE_EDITOR_USER, HGEE_EDITOR_PASSWORD, SERVER, HGEE_DATABASE)
 try:
     sql_engine=create_engine(sql_engine_string,pool_pre_ping=True)
 except Exception as e:
     error_occur = True
-    print(f"An error occurred trying to create db connection: {e}")    
+    logger.error(f"An error occurred trying to create db connection: {e}")    
 
 def monthly_averaging():
     def monthly_precip_stats(df, start_col, end_col, mm_col, conc_col, dep_col, flag_col, site_col=None):
@@ -312,7 +318,7 @@ def seasonal_averaging():
     results_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_seasonal_M-K_results_2025-10-09.csv', index=False, encoding='utf-8')
 
 def monthly_wet_dep_mk_results():
-    df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wet_dep_monthly_averages.csv', encoding='utf-8')
+    df = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\wd_monthly_averages.csv', encoding='utf-8')
 
     def mann_kendall_by_site_month(df, value_cols):
         """
@@ -1342,11 +1348,14 @@ def upload_dataframe_to_sql(sql_engine):
     finally:
         cur.close()
         conn.close()
+
+
+
 # run monthly averaging
 # monthly_averaging()
 
 # run the wet_dep mk test
-# monthly_wet_dep_mk_results()
+monthly_wet_dep_mk_results()
 
 # run seasonal_average
 # seasonal_averaging()
@@ -1355,7 +1364,7 @@ def upload_dataframe_to_sql(sql_engine):
 # annual_summary(sql_engine)
 
 # run the gantt plotter
-gantt_plotter(sql_engine)
+# gantt_plotter(sql_engine)
 
 # run an mdn assimilator
 # mdn_assimilator()

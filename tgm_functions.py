@@ -53,16 +53,27 @@ logger.addHandler(console_handler)
 ################## SQL database stuff ##############################
 
 # set global conditions for app and computer name
+# set up path details
+parent_dir = os.getcwd()
+logger.info(f"parent path: {parent_dir}")
+path_prefix = '/' + os.path.basename(os.path.normpath(parent_dir)) + '/'
+logger.info(f"path_prefix: {path_prefix}") 
+
 # set up the sql connection string
-COMPUTER, SERVER, VIEWER_USER, VIEWER_PASSWORD, EDITOR_USER, EDITOR_PASSWORD, DATABASE, URL_PREFIX = get_credentials(parent_dir)
+COMPUTER, SERVER, VIEWER_USER, VIEWER_PASSWORD, MPN_EDITOR_USER, MPN_EDITOR_PASSWORD, MPN_DATABASE, HGEE_EDITOR_USER, HGEE_EDITOR_PASSWORD, HGEE_DATABASE, URL_PREFIX = get_credentials(parent_dir)
 
 # set up the engine
-sql_engine_string=('postgresql://{}:{}@{}/{}?sslmode=require').format(EDITOR_USER,EDITOR_PASSWORD,SERVER,DATABASE)
+sql_engine_string=('postgresql://{}:{}@{}/{}?sslmode=require').format(HGEE_EDITOR_USER, HGEE_EDITOR_PASSWORD, SERVER, HGEE_DATABASE)
+# log the sql string
+logger.info(f"SQL engine string: {sql_engine_string}")
+
+
+
 try:
     sql_engine=create_engine(sql_engine_string,pool_pre_ping=True)
 except Exception as e:
     error_occur = True
-    print(f"An error occurred trying to create db connection: {e}")    
+    logger.error(f"An error occurred trying to create db connection: {e}")    
 
 ################### common data IO elements ##########################
 
@@ -359,6 +370,9 @@ def tgm_mk_analysis(sql_engine):
     )
     tgm_df.index = pd.to_datetime(tgm_df.index)
 
+    # cut off the data for only past 2010
+    tgm_df = tgm_df[tgm_df.index.year <= 2010]
+
     def annual_slope_from_monthly(monthly_slopes, month_counts=None):
         """
         Compute annual slope as a weighted average of monthly slopes.
@@ -592,7 +606,7 @@ def tgm_mk_analysis(sql_engine):
         "slope", "p", "ANNUAL TREND"
     ]]
 
-    annual_results_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07.csv', index=False, encoding='utf-8')
+    annual_results_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07_only_up_to_2010.csv', index=False, encoding='utf-8')
     # print(annual_results_df.head())
 
 
@@ -734,6 +748,104 @@ def table_check():
     else:
         print("✅ All sites have dep_mean, mm_mean, and pwc")
 
+def trend_cutoff_comparison(engine):
+    # read in the tgm annual results
+    df_2010 = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07_only_up_to_2010.csv', encoding='utf-8')
+    df_full = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07_full_data_spans.csv', encoding='utf-8')
+
+    # set the first column 'SITE' as the index for both dataframes
+    df_2010.set_index('SITE', inplace=True)
+    df_full.set_index('SITE', inplace=True)
+
+    # only keep the columns START DATE', 'END DATE', 'slope', 'p', and 'ANNUAL TREND' in both dataframes
+    df_2010 = df_2010[['START DATE', 'END DATE', 'slope', 'p', 'ANNUAL TREND']]
+    df_full = df_full[['START DATE', 'END DATE', 'slope', 'p', 'ANNUAL TREND']]
+
+    # set 'START DATE' and 'END DATE' to datetime for both dataframes
+    df_2010['START DATE'] = pd.to_datetime(df_2010['START DATE'])
+    df_2010['END DATE'] = pd.to_datetime(df_2010['END DATE'])
+    df_full['START DATE'] = pd.to_datetime(df_full['START DATE'])
+    df_full['END DATE'] = pd.to_datetime(df_full['END DATE'])
+
+    # create a new dataframe with the trend, p-value and slope for each site from both dataframes
+    comparison_df = df_2010.merge(df_full, on='SITE', suffixes=('_2010', '_full'))
+
+    # load in the continent information from the sites table into a dataframe
+    sql_data_query = """
+    SELECT SITE, CONTINENT
+    FROM sites
+    """ 
+
+    sites_df = pd.read_sql_query(sql_data_query, engine)
+
+    # change the case of the sites_df headers to all capitals
+    sites_df.columns = sites_df.columns.str.upper()
+
+    # merge the continent information into the comparison dataframe
+    comparison_df = comparison_df.merge(sites_df, on='SITE', how='left')
+
+    # Compare trend classifications between the full record and the 2010+ record
+    def compare_trends(row):
+        full = row['ANNUAL TREND_full']
+        recent = row['ANNUAL TREND_2010']
+        years_removed = row['END DATE_full'] - row['END DATE_2010'] if 'END DATE_full' in row and 'END DATE_2010' in row else pd.NaT
+
+        transitions = {
+
+            ("increasing", "increasing"):
+                ("unchanged", 0,
+                "Increasing trend unchanged"),
+
+            ("no trend", "no trend"):
+                ("unchanged", 0,
+                "No significant trend in either analysis"),
+
+            ("decreasing", "decreasing"):
+                ("unchanged", 0,
+                "Decreasing trend unchanged"),
+
+            ("increasing", "no trend"):
+                ("increase → no trend", -1,
+                "Increasing trend no longer significant"),
+
+            ("no trend", "decreasing"):
+                ("no trend → decrease", -1,
+                "A significant decreasing trend emerged"),
+
+            ("decreasing", "no trend"):
+                ("decrease → no trend", 1,
+                "Decreasing trend no longer significant"),
+
+            ("no trend", "increasing"):
+                ("no trend → increase", 1,
+                "A significant increasing trend emerged"),
+
+            ("increasing", "decreasing"):
+                ("increase → decrease", -2,
+                "Complete reversal from increasing to decreasing"),
+
+            ("decreasing", "increasing"):
+                ("decrease → increase", 2,
+                "Complete reversal from decreasing to increasing"),
+        }
+
+        trend_change, trend_shift, interpretation = transitions.get((full, recent),("unknown", np.nan, "Unknown transition"))
+
+        return pd.Series({
+            "years_removed": years_removed,
+            "trend_change": trend_change,
+            "trend_shift": trend_shift,
+            "Interpretation": interpretation
+        })
+
+    # apply the compare_trends function to each row of the comparison dataframe
+    comparison_df[["years_removed", "trend_change", "trend_shift", "Interpretation"]] = comparison_df.apply(compare_trends, axis=1)
+
+
+    # save the comparison dataframe to a csv file
+    comparison_df.to_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_trend_upto_cutoff_comparison_2025-10-07.csv', encoding='utf-8')
+    
+
 # Run the Gantt plotter
 # gantt_plotter(sql_engine)
 
@@ -753,4 +865,7 @@ def table_check():
 # histogram()
 
 # do a table check
-table_check()
+# table_check()
+
+# do a trend cutoff comparison
+trend_cutoff_comparison(sql_engine)
