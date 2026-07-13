@@ -748,7 +748,7 @@ def table_check():
     else:
         print("✅ All sites have dep_mean, mm_mean, and pwc")
 
-def trend_cutoff_comparison(engine):
+def tgm_trend_cutoff_comparison(engine):
     # read in the tgm annual results
     df_2010 = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07_only_up_to_2010.csv', encoding='utf-8')
     df_full = pd.read_csv(r'\\econm3hwvfsp008.ncr.int.ec.gc.ca\arqp_data\Projects\OnGoing\Mercury\HGEE-Minamata\Results and Plots\tgm_annual_M-K_results_2025-10-07_full_data_spans.csv', encoding='utf-8')
@@ -868,4 +868,4 @@ def trend_cutoff_comparison(engine):
 # table_check()
 
 # do a trend cutoff comparison
-trend_cutoff_comparison(sql_engine)
+tgm_trend_cutoff_comparison(sql_engine)
